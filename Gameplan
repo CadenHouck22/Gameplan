@@ -1,0 +1,366 @@
+install.packages(c("shiny", "tidyverse", "DT", "plotly"))
+
+
+library(shiny)
+library(tidyverse)
+library(DT)
+library(plotly)
+
+
+pitch_recs <- tibble(
+  pitcher = c("Paul Skenes", "Paul Skenes", "Paul Skenes",
+              "Yoshinobu Yamamoto", "Yoshinobu Yamamoto", "Yoshinobu Yamamoto"),
+  batter_hand = c("R", "R", "L", "R", "L", "L"),
+  count = c("0-2", "1-2", "0-2", "0-2", "1-2", "2-2"),
+  previous_pitch = c("FF", "FF", "SL", "FF", "FS", "CU"),
+  recommended_pitch = c("SPL", "SL", "FF", "FS", "FF", "CU"),
+  location = c("Below zone", "Glove side", "Up and in",
+               "Below zone", "Up", "Below zone"),
+  projected_csw = c(0.448, 0.392, 0.371, 0.421, 0.386, 0.354),
+  risk_level = c("Low", "Medium", "Medium", "Low", "Medium", "High")
+)
+
+arsenal_data <- tibble(
+  pitcher = c("Paul Skenes", "Paul Skenes", "Paul Skenes", "Paul Skenes",
+              "Yoshinobu Yamamoto", "Yoshinobu Yamamoto", "Yoshinobu Yamamoto"),
+  pitch_type = c("FF", "SPL", "SL", "CU", "FF", "FS", "CU"),
+  usage = c(42, 24, 21, 13, 39, 31, 18),
+  avg_velocity = c(99.1, 93.2, 86.7, 82.5, 95.6, 90.4, 77.8),
+  avg_csw = c(31.2, 39.8, 36.1, 33.4, 29.7, 37.9, 34.5)
+)
+
+
+ui <- fluidPage(
+  
+  tags$head(
+    tags$style(HTML("
+      body {
+        background-color: #f7f8fa;
+        font-family: Arial, sans-serif;
+      }
+      
+      .title-panel {
+        background-color: #13294B;
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+      }
+      
+      .metric-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0px 2px 8px rgba(0,0,0,0.12);
+        text-align: center;
+        margin-bottom: 15px;
+      }
+      
+      .metric-value {
+        font-size: 34px;
+        font-weight: bold;
+        color: #13294B;
+      }
+      
+      .metric-label {
+        font-size: 14px;
+        color: #666666;
+      }
+      
+      .section-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0px 2px 8px rgba(0,0,0,0.12);
+        margin-bottom: 20px;
+      }
+    "))
+  ),
+  
+  div(
+    class = "title-panel",
+    h1("Pitch Sequencing Optimizer"),
+    h4("A Shiny app for pitcher-specific game planning and pitch recommendation")
+  ),
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      h3("Inputs"),
+      
+      selectInput(
+        inputId = "pitcher",
+        label = "Select Pitcher:",
+        choices = unique(pitch_recs$pitcher)
+      ),
+      
+      selectInput(
+        inputId = "batter_hand",
+        label = "Batter Handedness:",
+        choices = c("R", "L")
+      ),
+      
+      selectInput(
+        inputId = "count",
+        label = "Count:",
+        choices = c("0-0", "0-1", "0-2", "1-0", "1-1", "1-2",
+                    "2-0", "2-1", "2-2", "3-0", "3-1", "3-2")
+      ),
+      
+      selectInput(
+        inputId = "previous_pitch",
+        label = "Previous Pitch:",
+        choices = c("FF", "SI", "SL", "SW", "CU", "CH", "FS", "SPL", "FC")
+      ),
+      
+      selectInput(
+        inputId = "goal",
+        label = "Optimization Goal:",
+        choices = c("CSW", "Whiff", "Chase", "Weak Contact")
+      )
+    ),
+    
+    mainPanel(
+      
+      tabsetPanel(
+        
+        tabPanel(
+          "Pitch Recommendation",
+          br(),
+          
+          fluidRow(
+            column(
+              4,
+              div(
+                class = "metric-card",
+                div(class = "metric-label", "Recommended Pitch"),
+                div(class = "metric-value", textOutput("best_pitch"))
+              )
+            ),
+            
+            column(
+              4,
+              div(
+                class = "metric-card",
+                div(class = "metric-label", "Projected CSW%"),
+                div(class = "metric-value", textOutput("projected_csw"))
+              )
+            ),
+            
+            column(
+              4,
+              div(
+                class = "metric-card",
+                div(class = "metric-label", "Risk Level"),
+                div(class = "metric-value", textOutput("risk_level"))
+              )
+            )
+          ),
+          
+          div(
+            class = "section-card",
+            h3("Recommendation Summary"),
+            verbatimTextOutput("recommendation_text")
+          ),
+          
+          div(
+            class = "section-card",
+            h3("Available Recommendations"),
+            DTOutput("recommendation_table")
+          )
+        ),
+        
+        tabPanel(
+          "Pitcher Arsenal",
+          br(),
+          
+          div(
+            class = "section-card",
+            h3("Pitch Usage"),
+            plotlyOutput("usage_plot")
+          ),
+          
+          div(
+            class = "section-card",
+            h3("Arsenal Table"),
+            DTOutput("arsenal_table")
+          )
+        ),
+        
+        tabPanel(
+          "Count Strategy",
+          br(),
+          
+          div(
+            class = "section-card",
+            h3("Best Pitch by Count"),
+            DTOutput("count_table")
+          )
+        ),
+        
+        tabPanel(
+          "Model Info",
+          br(),
+          
+          div(
+            class = "section-card",
+            h3("Model Overview"),
+            p("This app is designed to recommend pitch sequencing decisions using pitch-level Statcast data."),
+            p("The final model will predict the probability of a successful outcome such as called strike plus whiff percentage, whiff rate, chase rate, or weak contact."),
+            
+            h4("Planned Model Features"),
+            tags$ul(
+              tags$li("Pitch type"),
+              tags$li("Pitcher handedness"),
+              tags$li("Batter handedness"),
+              tags$li("Count"),
+              tags$li("Previous pitch type"),
+              tags$li("Velocity difference from previous pitch"),
+              tags$li("Movement difference from previous pitch"),
+              tags$li("Pitch location"),
+              tags$li("Release speed"),
+              tags$li("Horizontal movement"),
+              tags$li("Vertical movement")
+            ),
+            
+            h4("Limitations"),
+            p("This app uses public Statcast data and does not include private team information such as catcher targets, scouting reports, pitcher intent, injury status, or internal player development information.")
+          )
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  filtered_recs <- reactive({
+    pitch_recs %>%
+      filter(
+        pitcher == input$pitcher,
+        batter_hand == input$batter_hand
+      ) %>%
+      arrange(desc(projected_csw))
+  })
+  
+  best_rec <- reactive({
+    recs <- filtered_recs()
+    
+    if (nrow(recs) == 0) {
+      return(NULL)
+    }
+    
+    recs %>%
+      slice(1)
+  })
+  
+  output$best_pitch <- renderText({
+    rec <- best_rec()
+    
+    if (is.null(rec)) {
+      return("N/A")
+    }
+    
+    rec$recommended_pitch
+  })
+  
+  output$projected_csw <- renderText({
+    rec <- best_rec()
+    
+    if (is.null(rec)) {
+      return("N/A")
+    }
+    
+    paste0(round(rec$projected_csw * 100, 1), "%")
+  })
+  
+  output$risk_level <- renderText({
+    rec <- best_rec()
+    
+    if (is.null(rec)) {
+      return("N/A")
+    }
+    
+    rec$risk_level
+  })
+  
+  output$recommendation_text <- renderText({
+    rec <- best_rec()
+    
+    if (is.null(rec)) {
+      return("No recommendation available for this combination yet.")
+    }
+    
+    paste0(
+      "For ", input$pitcher, " against a ", input$batter_hand,
+      "-handed hitter, the recommended pitch is ", rec$recommended_pitch,
+      " located ", rec$location, ". The projected CSW probability is ",
+      round(rec$projected_csw * 100, 1), "%."
+    )
+  })
+  
+  output$recommendation_table <- renderDT({
+    filtered_recs() %>%
+      mutate(projected_csw = round(projected_csw * 100, 1)) %>%
+      rename(
+        Pitcher = pitcher,
+        Batter_Hand = batter_hand,
+        Count = count,
+        Previous_Pitch = previous_pitch,
+        Recommended_Pitch = recommended_pitch,
+        Location = location,
+        Projected_CSW_Percent = projected_csw,
+        Risk_Level = risk_level
+      )
+  })
+  
+  filtered_arsenal <- reactive({
+    arsenal_data %>%
+      filter(pitcher == input$pitcher)
+  })
+  
+  output$usage_plot <- renderPlotly({
+    p <- filtered_arsenal() %>%
+      ggplot(aes(x = reorder(pitch_type, usage), y = usage)) +
+      geom_col() +
+      coord_flip() +
+      labs(
+        x = "Pitch Type",
+        y = "Usage %",
+        title = paste(input$pitcher, "Pitch Usage")
+      ) +
+      theme_minimal()
+    
+    ggplotly(p)
+  })
+  
+  output$arsenal_table <- renderDT({
+    filtered_arsenal() %>%
+      rename(
+        Pitcher = pitcher,
+        Pitch_Type = pitch_type,
+        Usage_Percent = usage,
+        Average_Velocity = avg_velocity,
+        Average_CSW = avg_csw
+      )
+  })
+  
+  output$count_table <- renderDT({
+    pitch_recs %>%
+      filter(pitcher == input$pitcher) %>%
+      group_by(count, recommended_pitch) %>%
+      summarize(
+        avg_projected_csw = mean(projected_csw),
+        .groups = "drop"
+      ) %>%
+      arrange(count, desc(avg_projected_csw)) %>%
+      mutate(avg_projected_csw = round(avg_projected_csw * 100, 1)) %>%
+      rename(
+        Count = count,
+        Recommended_Pitch = recommended_pitch,
+        Average_Projected_CSW = avg_projected_csw
+      )
+  })
+}
+
+shinyApp(ui = ui, server = server)
